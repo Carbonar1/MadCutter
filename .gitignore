@@ -9,6 +9,10 @@ ffmpeg/ffmpeg.exe
 *.user
 .vs/
 
+# release artifacts
+MadCutter-v*.zip
+_rel_stage/
+
 # OS
 Thumbs.db
 .DS_Store
