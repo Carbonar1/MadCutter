@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>MadCutter</title>
+<style>
+  html,body{margin:0;height:100%;background:#1b1b1f;color:#e8e8ea;font-family:system-ui,"Yu Gothic UI",sans-serif;}
+  #top{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #333;flex-wrap:wrap;position:relative;}
+  button{background:#2a2a30;color:#e8e8ea;border:1px solid #444;padding:6px 12px;border-radius:4px;cursor:pointer;}
+  button:hover{background:#36363d;}
+  button.on{background:#4a90e2;color:#fff;border-color:#4a90e2;}
+  #name{font-size:13px;opacity:.8;margin-left:8px;}
+  #wave{margin:12px;background:#111;border:1px solid #333;}
+  #info{padding:4px 12px;font-size:13px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
+  #status{padding:6px 12px;font-size:12px;color:#9ad;min-height:16px;}
+  #hint{padding:4px 12px;font-size:11px;opacity:.5;}
+  input[type=number].t{background:#1b1b1f;color:#e8e8ea;border:1px solid #444;padding:2px 4px;border-radius:3px;width:84px;font-family:ui-monospace,Consolas,monospace;}
+  input[type=text].fname{background:#1b1b1f;color:#e8e8ea;border:1px solid #444;padding:2px 6px;border-radius:3px;width:260px;font-family:ui-monospace,Consolas,monospace;}
+  input[type=range]{vertical-align:middle;}
+  select#speed,select#br{background:#2a2a30;color:#e8e8ea;border:1px solid #444;padding:4px 6px;border-radius:4px;}
+
+  /* 履歴パネル */
+  #recentPanel{position:absolute;top:46px;left:10px;background:#23232a;border:1px solid #444;border-radius:4px;
+    padding:6px 0;min-width:360px;max-height:360px;overflow-y:auto;z-index:9;display:none;box-shadow:0 4px 16px rgba(0,0,0,.5);}
+  #recentPanel.show{display:block;}
+  .recentItem{padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .recentItem:hover{background:#2e2e37;}
+  .recentFoot{border-top:1px solid #333;padding:6px 12px;text-align:right;}
+  .recentFoot button{font-size:11px;padding:3px 8px;}
+
+  /* modal */
+  #modalBg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:20;}
+  #modalBg.show{display:flex;}
+  #modal{background:#23232a;border:1px solid #444;border-radius:6px;padding:16px 20px;min-width:420px;}
+  #modal h3{margin:0 0 10px;font-size:14px;}
+  #modal h4{margin:14px 0 6px;font-size:13px;opacity:.9;}
+  #modal table{border-collapse:collapse;width:100%;font-size:13px;}
+  #modal td{padding:4px 6px;border-bottom:1px solid #333;}
+  #modal td:nth-child(2){text-align:right;}
+  .keybtn{background:#2a2a30;border:1px solid #555;color:#e8e8ea;padding:3px 10px;border-radius:3px;cursor:pointer;min-width:80px;}
+  .keybtn.listening{background:#4a90e2;color:#fff;}
+  #modalFoot{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;}
+</style>
+</head>
+<body>
+<div id="top">
+  <button id="open">ファイルを開く</button>
+  <button id="recent" title="最近開いたファイル">履歴 ▾</button>
+  <button id="play">再生/停止</button>
+  <button id="setIn">IN</button>
+  <button id="setOut">OUT</button>
+  <button id="loop" title="IN〜OUT区間をループ再生">ループ</button>
+  <button id="export">書き出し</button>
+  <label style="font-size:12px;opacity:.8;margin-left:4px;">形式
+    <select id="fmt">
+      <option value="mp3" selected>MP3</option>
+      <option value="wav">WAV (無圧縮)</option>
+      <option value="aac">AAC (m4a)</option>
+      <option value="ogg">OGG (Vorbis)</option>
+    </select>
+  </label>
+  <label style="font-size:12px;opacity:.8;">品質
+    <select id="br"></select>
+  </label>
+  <label style="font-size:12px;opacity:.8;">速度
+    <select id="speed">
+      <option value="0.25">0.25x</option>
+      <option value="0.5">0.5x</option>
+      <option value="0.75">0.75x</option>
+      <option value="1" selected>1.0x</option>
+      <option value="1.25">1.25x</option>
+      <option value="1.5">1.5x</option>
+      <option value="2">2.0x</option>
+    </select>
+  </label>
+  <label style="font-size:12px;opacity:.8;">音量
+    <input id="vol" type="range" min="0" max="1" step="0.01" value="1" style="width:90px;">
+    <span id="volV" style="font-family:ui-monospace,Consolas,monospace;">100%</span>
+  </label>
+  <button id="settings" title="設定">⚙ 設定</button>
+  <button id="clearCache" title="波形キャッシュを削除">キャッシュ削除</button>
+  <span id="name">ファイル未選択（ドラッグ&amp;ドロップも可）</span>
+
+  <div id="recentPanel"></div>
+</div>
+<div id="wave"></div>
+<div id="info">
+  <span>IN: <input id="inInput" class="t" type="number" step="0.001" min="0" placeholder="-"></span>
+  <span>OUT: <input id="outInput" class="t" type="number" step="0.001" min="0" placeholder="-"></span>
+  <span>現在: <b id="curV">0.00</b></span>
+  <span>長さ: <b id="durV">-</b></span>
+  <span id="fnameRow" style="display:none;">ファイル名: <input id="fnameInput" class="fname" type="text" placeholder="自動"></span>
+</div>
+<div id="hint"></div>
+<div id="status"></div>
+
+<div id="modalBg">
+  <div id="modal">
+    <h3>設定</h3>
+
+    <h4>表示</h4>
+    <label style="font-size:13px;display:flex;align-items:center;gap:6px;">
+      <input id="optFname" type="checkbox"> 書き出し前にファイル名プレビュー欄を表示
+    </label>
+
+    <h4>ショートカット</h4>
+    <table id="kbtbl"></table>
+
+    <div id="modalFoot">
+      <button id="kbReset">キーをデフォルトに戻す</button>
+      <button id="kbClose">閉じる</button>
+    </div>
+    <div style="font-size:11px;opacity:.6;margin-top:8px;">キー欄のボタンを押して、割り当てたいキーを押す。Escでキャンセル。</div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

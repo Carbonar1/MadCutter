@@ -1,0 +1,14 @@
+# build
+bin/
+obj/
+
+# ffmpeg (zipで同梱、exeは除外)
+ffmpeg/ffmpeg.exe
+
+# ユーザー設定
+*.user
+.vs/
+
+# OS
+Thumbs.db
+.DS_Store
