@@ -26,6 +26,7 @@ const ACTIONS = [
   { id: 'seekFwd',   label: '5秒進む', def: 'ArrowRight' },
 ];
 const DEFAULT_KEYS = Object.fromEntries(ACTIONS.map(a => [a.id, a.def]));
+const DEFAULT_OPTS = { showFnamePreview: false };
 const KEYS_LS = 'madcutter_keys_v1';
 const OPT_LS  = 'madcutter_opts_v1';
 let keys = loadKeys();
@@ -40,7 +41,6 @@ function loadKeys() {
 }
 function saveKeys() { localStorage.setItem(KEYS_LS, JSON.stringify(keys)); }
 
-const DEFAULT_OPTS = { showFnamePreview: false };
 function loadOpts() {
   try {
     const raw = localStorage.getItem(OPT_LS);

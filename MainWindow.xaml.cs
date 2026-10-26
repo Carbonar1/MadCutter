@@ -93,6 +93,7 @@ public partial class MainWindow : Window
     {
         await Web.EnsureCoreWebView2Async();
         Web.CoreWebView2.WebMessageReceived += OnWebMessage;
+        try { Web.AllowExternalDrop = false; } catch { }
 
         var webDir = Path.Combine(AppContext.BaseDirectory, "web");
         Web.CoreWebView2.SetVirtualHostNameToFolderMapping(
@@ -243,7 +244,7 @@ public partial class MainWindow : Window
                 {
                     Filter = "メディア|*.mp4;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.mov;*.mkv|全ファイル|*.*"
                 };
-                if (dlg.ShowDialog() == true) await LoadMediaAsync(dlg.FileName);
+                if (dlg.ShowDialog(this) == true) await LoadMediaAsync(dlg.FileName);
             }
             else if (type == "clearCache")
             {
