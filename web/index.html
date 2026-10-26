@@ -93,6 +93,7 @@
 </div>
 <div id="hint"></div>
 <div id="status"></div>
+<div id="errLog" style="font-size:11px;color:#f88;white-space:pre-wrap;max-height:80px;overflow:auto;"></div>
 
 <div id="modalBg">
   <div id="modal">
@@ -115,19 +116,24 @@
 </div>
 
 <script>
+window._appendErr = function(msg) {
+  const el = document.getElementById('errLog');
+  if (!el) return;
+  const t = new Date().toLocaleTimeString();
+  el.textContent = `[${t}] ${msg}\n` + el.textContent;
+  // keep latest 10 lines
+  const lines = el.textContent.split('\n').slice(0, 10);
+  el.textContent = lines.join('\n');
+};
 window.addEventListener('error', e => {
-  const s = document.getElementById('status');
-  const msg = 'JS ERR: ' + (e.message || e.error) + ' @ ' + (e.filename||'') + ':' + (e.lineno||'');
-  if (s) s.textContent = msg;
-  console.error(msg, e);
+  _appendErr('JS ERR: ' + (e.message || e.error));
+  console.error(e);
 });
 window.addEventListener('unhandledrejection', e => {
-  const s = document.getElementById('status');
-  const msg = 'JS REJECT: ' + (e.reason && (e.reason.message || e.reason));
-  if (s) s.textContent = msg;
-  console.error(msg, e);
+  _appendErr('JS REJECT: ' + (e.reason && (e.reason.message || e.reason)));
+  console.error(e);
 });
 </script>
-<script type="module" src="./app.js?v=2"></script>
+<script type="module" src="./app.js?v=4"></script>
 </body>
 </html>

@@ -147,6 +147,16 @@ public partial class MainWindow : Window
         return sb.ToString();
     }
 
+    private static readonly HashSet<string> DirectPlayExt = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"
+    };
+
+    private static readonly HashSet<string> AlwaysReencodeExt = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mkv", ".webm", ".avi", ".ts", ".flv"
+    };
+
     private async Task LoadMediaAsync(string path)
     {
         if (!File.Exists(_ffmpegPath))
@@ -164,29 +174,104 @@ public partial class MainWindow : Window
         _currentMediaPath = path;
         AddRecent(path);
         var key = CacheKey(path);
-        _tempWavPath = Path.Combine(_tempDir, key + ".wav");
-        var fileName = key + ".wav";
+        var srcExt = Path.GetExtension(path).ToLowerInvariant();
 
-        bool cached = File.Exists(_tempWavPath) && new FileInfo(_tempWavPath).Length > 44;
+        string cacheExt;
+        string cachePath;
+        bool needDecode = false;
 
-        if (!cached)
+        if (DirectPlayExt.Contains(srcExt))
         {
-            PostToWeb(new { type = "status", text = $"デコード中: {Path.GetFileName(path)}" });
-            var ok = await RunFfmpegAsync($"-y -i \"{path}\" -ac 1 -ar 44100 -vn \"{_tempWavPath}\"");
-            if (!ok)
+            cacheExt = srcExt;
+            cachePath = Path.Combine(_tempDir, key + cacheExt);
+            if (!File.Exists(cachePath) || new FileInfo(cachePath).Length == 0)
             {
-                PostToWeb(new { type = "status", text = "デコード失敗" });
-                return;
+                PostToWeb(new { type = "status", text = $"読み込み中: {Path.GetFileName(path)}" });
+                try { File.Copy(path, cachePath, true); TrimCache(); }
+                catch { needDecode = true; }
             }
-            TrimCache();
+            else
+            {
+                try { File.SetLastAccessTimeUtc(cachePath, DateTime.UtcNow); } catch { }
+                PostToWeb(new { type = "status", text = "キャッシュから読み込み" });
+            }
+        }
+        else if (AlwaysReencodeExt.Contains(srcExt))
+        {
+            cacheExt = ".m4a";
+            cachePath = Path.Combine(_tempDir, key + cacheExt);
+            needDecode = true;
         }
         else
         {
-            try { File.SetLastAccessTimeUtc(_tempWavPath, DateTime.UtcNow); } catch { }
-            PostToWeb(new { type = "status", text = "キャッシュから読み込み" });
+            var codec = await ProbeAudioCodecAsync(path);
+            PostToWeb(new { type = "log", text = $"probe codec={codec ?? "(unknown)"} src={Path.GetFileName(path)}" });
+            var (streamExt, streamArgs) = PickStreamCopyTarget(codec);
+
+            if (streamExt != null)
+            {
+                cacheExt = streamExt;
+                cachePath = Path.Combine(_tempDir, key + cacheExt);
+                if (!File.Exists(cachePath) || new FileInfo(cachePath).Length < 44)
+                {
+                    PostToWeb(new { type = "status", text = $"音声抽出中: {Path.GetFileName(path)}" });
+                    var ok = await RunFfmpegAsync($"-y -i \"{path}\" {streamArgs} \"{cachePath}\"");
+                    if (!ok)
+                    {
+                        Debug.WriteLine($"stream copy failed codec={codec} err={_lastFfmpegErr}");
+                        try { if (File.Exists(cachePath)) File.Delete(cachePath); } catch { }
+                        needDecode = true;
+                    }
+                    else
+                    {
+                        TrimCache();
+                    }
+                }
+                else
+                {
+                    try { File.SetLastAccessTimeUtc(cachePath, DateTime.UtcNow); } catch { }
+                    PostToWeb(new { type = "status", text = "キャッシュから読み込み" });
+                }
+            }
+            else
+            {
+                cacheExt = ".m4a";
+                cachePath = Path.Combine(_tempDir, key + cacheExt);
+                needDecode = true;
+            }
         }
 
-        var url = $"https://madcutter-temp.local/{fileName}";
+        if (needDecode)
+        {
+            cacheExt = ".wav";
+            cachePath = Path.Combine(_tempDir, key + cacheExt);
+            if (!File.Exists(cachePath) || new FileInfo(cachePath).Length < 44)
+            {
+                PostToWeb(new { type = "status", text = $"デコード中(wav): {Path.GetFileName(path)}" });
+                var ok = await RunFfmpegAsync($"-y -i \"{path}\" -ac 1 -ar 8000 -vn -c:a pcm_s16le \"{cachePath}\"");
+                if (!ok)
+                {
+                    PostToWeb(new { type = "status", text = $"デコード失敗: {_lastFfmpegErr}" });
+                    return;
+                }
+                TrimCache();
+            }
+            else
+            {
+                try { File.SetLastAccessTimeUtc(cachePath, DateTime.UtcNow); } catch { }
+            }
+        }
+
+        _tempWavPath = cachePath;
+        if (!File.Exists(cachePath))
+        {
+            PostToWeb(new { type = "status", text = $"cacheファイル生成失敗: {cachePath} / err={_lastFfmpegErr}" });
+            return;
+        }
+        var sz = new FileInfo(cachePath).Length;
+        PostToWeb(new { type = "status", text = $"cache ok ({sz:N0} bytes, {cacheExt})" });
+        PostToWeb(new { type = "log", text = $"cache={cachePath} size={sz}" });
+        var url = $"https://madcutter-temp.local/{key}{cacheExt}";
         PostToWeb(new { type = "load", url, name = Path.GetFileName(path) });
     }
 
@@ -194,7 +279,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var files = new DirectoryInfo(_tempDir).GetFiles("*.wav");
+            var files = new DirectoryInfo(_tempDir).GetFiles();
             long total = 0;
             foreach (var f in files) total += f.Length;
             if (total <= CacheMaxBytes) return;
@@ -262,7 +347,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            foreach (var f in Directory.GetFiles(_tempDir, "*.wav"))
+            foreach (var f in Directory.GetFiles(_tempDir))
             {
                 if (_tempWavPath != null && string.Equals(f, _tempWavPath, StringComparison.OrdinalIgnoreCase)) continue;
                 try { File.Delete(f); } catch { }
@@ -358,9 +443,52 @@ public partial class MainWindow : Window
         PostToWeb(new { type = "status", text = ok ? "出力完了: " + dlg.FileName : "出力失敗" });
     }
 
-    private Task<bool> RunFfmpegAsync(string args)
+    private async Task<string?> ProbeAudioCodecAsync(string path)
     {
-        var tcs = new TaskCompletionSource<bool>();
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = _ffmpegPath,
+                Arguments = $"-hide_banner -i \"{path}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardError = true
+            };
+            using var p = Process.Start(psi)!;
+            var stderr = await p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync();
+            var m = System.Text.RegularExpressions.Regex.Match(stderr, @"Audio:\s*([A-Za-z0-9_]+)");
+            return m.Success ? m.Groups[1].Value.ToLowerInvariant() : null;
+        }
+        catch { return null; }
+    }
+
+    private static (string? ext, string args) PickStreamCopyTarget(string? codec)
+    {
+        switch (codec)
+        {
+            case "aac":    return (".m4a", "-vn -c:a copy -bsf:a aac_adtstoasc -movflags +faststart");
+            case "mp3":    return (".mp3", "-vn -c:a copy");
+            case "vorbis": return (".ogg", "-vn -c:a copy");
+            case "opus":   return (".ogg", "-vn -c:a copy");
+            case "flac":   return (".flac", "-vn -c:a copy");
+            case "pcm_s16le":
+            case "pcm_s24le":
+            case "pcm_s32le":
+            case "pcm_f32le":
+            case "pcm_s16be":
+            case "pcm_s24be":
+                           return (".wav", "-vn -c:a pcm_s16le");
+            default:       return (null, "");
+        }
+    }
+
+    private string _lastFfmpegErr = "";
+
+    private async Task<bool> RunFfmpegAsync(string args)
+    {
+        _lastFfmpegErr = "";
         var psi = new ProcessStartInfo
         {
             FileName = _ffmpegPath,
@@ -369,11 +497,22 @@ public partial class MainWindow : Window
             UseShellExecute = false,
             RedirectStandardError = true
         };
-        var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        p.Exited += (_, _) => { tcs.TrySetResult(p.ExitCode == 0); p.Dispose(); };
-        try { p.Start(); p.BeginErrorReadLine(); }
-        catch (Exception ex) { tcs.TrySetResult(false); MessageBox.Show(ex.Message); }
-        return tcs.Task;
+        try
+        {
+            using var p = Process.Start(psi)!;
+            var stderr = await p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync();
+            if (p.ExitCode != 0)
+            {
+                var lines = stderr.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
+                _lastFfmpegErr = lines.Count > 0 ? lines[^1].Trim() : "exit=" + p.ExitCode;
+                Debug.WriteLine("ffmpeg args: " + args);
+                Debug.WriteLine("ffmpeg stderr:\n" + stderr);
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex) { _lastFfmpegErr = ex.Message; return false; }
     }
 
     private void PostToWeb(object payload)

@@ -105,6 +105,11 @@ function initWs() {
   regions = ws.registerPlugin(RegionsPlugin.create());
 
   ws.on('decode', () => { $('durV').textContent = ws.getDuration().toFixed(2) + 's'; });
+  ws.on('ready', () => { setStatus('波形準備完了 (' + ws.getDuration().toFixed(2) + 's)'); });
+  ws.on('error', (err) => {
+    const msg = (err && (err.message || err.toString())) || 'unknown';
+    setStatus('波形デコード失敗: ' + msg);
+  });
   ws.on('timeupdate', (t) => {
     $('curV').textContent = t.toFixed(2);
     if (loopEnabled && inSec != null && outSec != null && outSec > inSec) {
@@ -434,10 +439,16 @@ window.chrome.webview.addEventListener('message', (ev) => {
     fnameUserEdited = false;
     refreshFnameSuggestion();
     if (!ws) initWs();
-    ws.load(d.url);
-    setStatus('読み込み完了');
+    setStatus('波形デコード中... (' + d.url.split('/').pop() + ')');
+    ws.load(d.url).catch(e => setStatus('load失敗: ' + (e && e.message || e)));
   } else if (d.type === 'status') {
     setStatus(d.text);
+  } else if (d.type === 'log') {
+    if (typeof window._appendErr === 'function') window._appendErr(d.text);
+    else {
+      const el = document.getElementById('errLog');
+      if (el) el.textContent = `[host] ${d.text}\n` + el.textContent;
+    }
   } else if (d.type === 'recent') {
     recentList = d.list || [];
   }
